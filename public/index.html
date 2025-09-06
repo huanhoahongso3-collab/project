@@ -1,0 +1,9 @@
+<form method="post" action="/api/chat" style="flex:1; display:flex; gap:5px;">
+  <input type="text" name="prompt" placeholder="Type your message..." required>
+  <button type="submit">Send</button>
+</form>
+<form method="post" action="/api/chat">
+  <input type="hidden" name="clear" value="1">
+  <button type="submit">Clear History</button>
+</form>
+
