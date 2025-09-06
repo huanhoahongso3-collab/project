@@ -1,0 +1,24 @@
+{
+  "name": "gemini-chatbot",
+  "version": "1.0.0",
+  "description": "Node.js Gemini Chatbot compatible with Vercel and Opera Mini",
+  "main": "api/chat.js",
+  "scripts": {
+    "start": "node api/chat.js",
+    "vercel-build": "echo Build complete"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^1.0.0"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "keywords": [
+    "chatbot",
+    "gemini",
+    "nodejs",
+    "vercel"
+  ],
+  "author": "huanhoahongso3-collab",
+  "license": "Unknown"
+}
