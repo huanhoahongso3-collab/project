@@ -8,10 +8,10 @@
     "vercel-build": "echo Build complete"
   },
   "dependencies": {
-    "@google/genai": "^0.1.0"
+    "@google/genai": ">=0.1.0"
   },
   "engines": {
-    "node": "22.x"
+    "node": "20.x"
   },
   "keywords": [
     "chatbot",
@@ -22,3 +22,4 @@
   "author": "hhhso3-collab",
   "license": "MIT"
 }
+
