@@ -1,7 +1,10 @@
 import { neon } from "@neondatabase/serverless";
 import { GoogleGenAI } from "@google/genai";
 
+// --- Neon DB connection ---
 const sql = neon(process.env.DATABASE_URL);
+
+// --- Gemini API ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- Helpers ---
@@ -13,7 +16,6 @@ function newSessionId() {
   return Math.random().toString(36).substring(2);
 }
 
-// --- Gemini API ---
 async function askGemini(prompt, history) {
   try {
     const contents = [
@@ -36,7 +38,6 @@ async function askGemini(prompt, history) {
   }
 }
 
-// --- HTML render ---
 function renderChat(history) {
   return `
 <!DOCTYPE html>
@@ -80,52 +81,71 @@ ${history.map(
 
 // --- Serverless handler ---
 export default async function handler(req, res) {
-  const cookies = Object.fromEntries(
-    (req.headers.cookie || "").split(";").map((c) => {
-      const [k, ...v] = c.split("=");
-      return [k?.trim(), decodeURIComponent(v.join("="))];
-    })
-  );
-  let sessionId = cookies.sessionId || newSessionId();
+  try {
+    // Parse cookies
+    const cookies = Object.fromEntries(
+      (req.headers.cookie || "")
+        .split(";")
+        .map((c) => {
+          const [k, ...v] = c.split("=");
+          return [k?.trim(), decodeURIComponent(v.join("="))];
+        })
+    );
 
-  if (req.method === "POST" && req.url.includes("clear")) {
-    await sql`DELETE FROM chat_history WHERE session_id = ${sessionId}`;
-    res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
-    return res.writeHead(302, { Location: "/api/chat" }).end();
-  }
+    let sessionId = cookies.sessionId || newSessionId();
 
-  const dbHistory = await sql`
-    SELECT role, text FROM chat_history
-    WHERE session_id = ${sessionId}
-    ORDER BY created_at ASC
-  `;
-  const history = dbHistory.map((h) => ({ role: h.role, text: h.text }));
-
-  if (req.method === "POST") {
-    const body = await new Promise((resolve) => {
-      let data = "";
-      req.on("data", (chunk) => (data += chunk));
-      req.on("end", () => resolve(data));
-    });
-
-    const params = new URLSearchParams(body);
-    const prompt = params.get("prompt");
-
-    const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
-    const reply = await askGemini(prompt, chatHistory.slice(-10));
-    chatHistory.push({ role: "bot", text: formatText(reply) });
-
-    for (const msg of chatHistory.slice(-2)) {
-      await sql`
-        INSERT INTO chat_history (session_id, role, text)
-        VALUES (${sessionId}, ${msg.role}, ${msg.text})
-      `;
+    // Clear history
+    if (req.method === "POST" && req.url.includes("clear")) {
+      await sql`DELETE FROM chat_history WHERE session_id = ${sessionId}`;
+      res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
+      return res.writeHead(302, { Location: "/api/chat" }).end();
     }
 
-    res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
-    return res.writeHead(302, { Location: "/api/chat" }).end();
-  }
+    // Retrieve chat history
+    const dbHistory = await sql`
+      SELECT role, text FROM chat_history
+      WHERE session_id = ${sessionId}
+      ORDER BY created_at ASC
+    `;
+    const history = dbHistory.map((h) => ({ role: h.role, text: h.text }));
 
-  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  res.end(renderChat(history));
+    if (req.method === "POST") {
+      const body = await new Promise((resolve) => {
+        let data = "";
+        req.on("data", (chunk) => (data += chunk));
+        req.on("end", () => resolve(data));
+      });
+
+      const params = new URLSearchParams(body);
+      const prompt = params.get("prompt");
+
+      if (!prompt?.trim()) {
+        return res.writeHead(302, { Location: "/api/chat" }).end();
+      }
+
+      // Limit AI context to last 10 messages
+      const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
+      const reply = await askGemini(prompt, chatHistory.slice(-10));
+      chatHistory.push({ role: "bot", text: formatText(reply) });
+
+      // Insert last 2 messages (user + bot) into DB
+      for (const msg of chatHistory.slice(-2)) {
+        await sql`
+          INSERT INTO chat_history (session_id, role, text)
+          VALUES (${sessionId}, ${msg.role}, ${msg.text})
+        `;
+      }
+
+      res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
+      return res.writeHead(302, { Location: "/api/chat" }).end();
+    }
+
+    // GET → render chat page
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(renderChat(history));
+  } catch (err) {
+    console.error("Server error:", err);
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end("Internal Server Error");
+  }
 }
