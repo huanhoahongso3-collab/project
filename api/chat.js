@@ -4,7 +4,7 @@ import { GoogleGenAI } from "@google/genai";
 // --- Neon DB connection ---
 const sql = neon(process.env.DATABASE_URL);
 
-// --- Gemini AI ---
+// --- Gemini API ---
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- Helpers ---
@@ -16,12 +16,12 @@ function newSessionId() {
   return Math.random().toString(36).substring(2);
 }
 
-// Ask Gemini AI
+// Ask Gemini AI (old message reading, compatible with response.text)
 async function askGemini(prompt, history) {
   try {
     const contents = [
-      ...history.slice(-10).map(msg => ({
-        role: msg.role === "user" ? "user" : "assistant",
+      ...history.map(msg => ({
+        role: msg.role === "user" ? "user" : "model", // must be "model"
         parts: [{ text: msg.text }],
       })),
       { role: "user", parts: [{ text: prompt }] },
@@ -32,22 +32,15 @@ async function askGemini(prompt, history) {
       contents,
     });
 
-    console.log("Gemini raw response:", JSON.stringify(response, null, 2));
-
-    // Safely extract all text from first candidate
-    const text = response?.candidates?.[0]?.content
-      ?.map(part => part.text)
-      .filter(Boolean)
-      .join("") || "(no response)";
-
-    return text;
+    // Old logic: just use `response.text` as before
+    return response.text || "(no response)";
   } catch (err) {
-    console.error("Gemini API error:", err.response?.data || err);
+    console.error("Gemini API error:", err);
     return "(error contacting AI)";
   }
 }
 
-// Render HTML page
+// Render chat HTML
 function renderChat(history) {
   return `
 <!DOCTYPE html>
@@ -77,12 +70,10 @@ button { padding: 5px 10px; }
 </div>
 <hr>
 <div>
-${history
-  .map(
+${history.map(
     msg =>
       `<div class="message"><b>${msg.role === "user" ? "You" : "Bot"}:</b><div class="bubble">${msg.text}</div></div>`
-  )
-  .join("")}
+  ).join("")}
 </div>
 </body>
 </html>
@@ -131,21 +122,18 @@ export default async function handler(req, res) {
       const prompt = params.get("prompt")?.trim();
       if (!prompt) return res.writeHead(302, { Location: "/api/chat" }).end();
 
-      // Prepare history for AI
-      const aiInputHistory = [...history, { role: "user", text: prompt }];
+      // Limit AI context to last 10 messages
+      const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
+      const reply = await askGemini(prompt, chatHistory.slice(-10));
+      chatHistory.push({ role: "bot", text: formatText(reply) });
 
-      // Ask Gemini
-      const reply = await askGemini(prompt, aiInputHistory);
-
-      // Store user + AI messages
-      await sql`
-        INSERT INTO chat_history (session_id, role, text)
-        VALUES (${sessionId}, 'user', ${prompt})
-      `;
-      await sql`
-        INSERT INTO chat_history (session_id, role, text)
-        VALUES (${sessionId}, 'bot', ${reply})
-      `;
+      // Insert last 2 messages (user + bot) into DB
+      for (const msg of chatHistory.slice(-2)) {
+        await sql`
+          INSERT INTO chat_history (session_id, role, text)
+          VALUES (${sessionId}, ${msg.role}, ${msg.text})
+        `;
+      }
 
       res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
       return res.writeHead(302, { Location: "/api/chat" }).end();
