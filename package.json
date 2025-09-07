@@ -1,11 +1,12 @@
 {
   "name": "vercel-gemini-chat",
-  "version": "1.0",
-  "description": "Gemini Chatbot on Vercel using cookie-based sessions",
+  "version": "1.0.0",
+  "description": "Gemini Chatbot using @google/genai with cookie-based session",
   "type": "module",
   "scripts": {
     "dev": "vercel dev"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@google/genai": ">=0.5.0"
+  }
 }
-
