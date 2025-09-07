@@ -1,28 +1,18 @@
 // api/chat.js
-import fs from "fs";
-import path from "path";
-import fetch from "node-fetch";
-
-const SESSIONS_DIR = path.resolve(".sessions"); // store session files
-
-if (!fs.existsSync(SESSIONS_DIR)) fs.mkdirSync(SESSIONS_DIR);
-
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // --- Helpers ---
 function formatText(text) {
-  if (!text) return "";
-  return text.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
+  return text?.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>") || "";
 }
 
 function parseCookies(cookieHeader) {
   const list = {};
   if (!cookieHeader) return list;
   cookieHeader.split(";").forEach(cookie => {
-    let [name, ...rest] = cookie.split("=");
-    name = name?.trim();
+    const [name, ...rest] = cookie.split("=");
     if (!name) return;
-    list[name] = decodeURIComponent(rest.join("="));
+    list[name.trim()] = decodeURIComponent(rest.join("="));
   });
   return list;
 }
@@ -31,22 +21,16 @@ function newSessionId() {
   return Math.random().toString(36).substring(2);
 }
 
-function getSessionFile(sessionId) {
-  return path.join(SESSIONS_DIR, sessionId + ".json");
+function encodeHistory(history) {
+  return encodeURIComponent(JSON.stringify(history));
 }
 
-function getHistory(sessionId) {
-  const file = getSessionFile(sessionId);
-  if (!fs.existsSync(file)) return [];
+function decodeHistory(cookieValue) {
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    return JSON.parse(decodeURIComponent(cookieValue)) || [];
   } catch {
     return [];
   }
-}
-
-function saveHistory(sessionId, history) {
-  fs.writeFileSync(getSessionFile(sessionId), JSON.stringify(history, null, 2));
 }
 
 async function askGemini(prompt, history) {
@@ -54,6 +38,7 @@ async function askGemini(prompt, history) {
     ...history.map(msg => ({ role: msg.role, parts: [{ text: msg.text }] })),
     { role: "user", parts: [{ text: prompt }] }
   ];
+
   try {
     const res = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
@@ -76,45 +61,38 @@ async function askGemini(prompt, history) {
 
 function renderChat(history) {
   return `
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <meta charset="UTF-8">
-    <title>Gemini Chatbot</title>
-    <style>
-      body { font-family: sans-serif; max-width: 600px; margin: auto; }
-      form { margin-top: 10px; }
-      input[type=text] { flex: 1; padding: 5px; }
-      button { padding: 5px 10px; }
-      .message { margin: 8px 0; }
-      .bubble { white-space: pre-wrap; margin-left: 10px; }
-    </style>
-  </head>
-  <body>
-    <h2>Gemini Chatbot</h2>
-    <div style="display:flex; gap:10px; align-items:flex-start; margin-bottom:10px;">
-      <form method="post" action="/api/chat" style="flex:1; display:flex; gap:5px;">
-        <input type="text" name="prompt" placeholder="Type your message..." required>
-        <button type="submit">Send</button>
-      </form>
-      <form method="post" action="/api/chat?clear=1">
-        <button type="submit">Clear History</button>
-      </form>
-    </div>
-    <hr>
-    <div>
-      ${history
-        .map(
-          msg => `<div class="message">
-                    <b>${msg.role === "user" ? "You" : "Bot"}:</b>
-                    <div class="bubble">${msg.text}</div>
-                  </div>`
-        )
-        .join("")}
-    </div>
-  </body>
-  </html>
-  `;
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Gemini Chatbot</title>
+<style>
+body { font-family: sans-serif; max-width: 600px; margin: auto; }
+form { margin-top: 10px; }
+input[type=text] { flex: 1; padding: 5px; }
+button { padding: 5px 10px; }
+.message { margin: 8px 0; }
+.bubble { white-space: pre-wrap; margin-left: 10px; }
+</style>
+</head>
+<body>
+<h2>Gemini Chatbot</h2>
+<div style="display:flex; gap:10px; align-items:flex-start; margin-bottom:10px;">
+<form method="post" action="/api/chat" style="flex:1; display:flex; gap:5px;">
+<input type="text" name="prompt" placeholder="Type your message..." required>
+<button type="submit">Send</button>
+</form>
+<form method="post" action="/api/chat?clear=1">
+<button type="submit">Clear History</button>
+</form>
+</div>
+<hr>
+<div>
+${history.map(msg => `<div class="message"><b>${msg.role === "user" ? "You" : "Bot"}:</b><div class="bubble">${msg.text}</div></div>`).join("")}
+</div>
+</body>
+</html>
+`;
 }
 
 // --- Serverless handler ---
@@ -122,12 +100,17 @@ export default async function handler(req, res) {
   const cookies = parseCookies(req.headers.cookie);
   let sessionId = cookies.sessionId || newSessionId();
 
-  let history = getHistory(sessionId);
+  // Load history from cookie
+  let history = cookies[`history_${sessionId}`]
+    ? decodeHistory(cookies[`history_${sessionId}`])
+    : [];
 
   if (req.method === "POST" && req.url.includes("clear")) {
     history = [];
-    saveHistory(sessionId, history);
-    res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
+    res.setHeader("Set-Cookie", [
+      `sessionId=${sessionId}; Path=/`,
+      `history_${sessionId}=; Path=/; Max-Age=0`
+    ]);
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
 
@@ -140,9 +123,13 @@ export default async function handler(req, res) {
     history.push({ role: "user", text: formatText(prompt) });
     const reply = await askGemini(prompt, history);
     history.push({ role: "bot", text: formatText(reply) });
-    saveHistory(sessionId, history);
 
-    res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
+    // Save history in cookie
+    res.setHeader("Set-Cookie", [
+      `sessionId=${sessionId}; Path=/`,
+      `history_${sessionId}=${encodeHistory(history)}; Path=/; HttpOnly`
+    ]);
+
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
 
