@@ -6,13 +6,14 @@
     "dev": "vercel dev"
   },
   "dependencies": {
-    "@google/genai": ">=0.5.0",
+    "@cerebras/cerebras_cloud_sdk": ">=0.5.0",
     "@neondatabase/serverless": ">=0.1.0"
   },
   "engines": {
     "node": ">=20.x"
   }
 }
+
 
 
 
