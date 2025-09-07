@@ -4,8 +4,7 @@
   "description": "Gemini Chatbot on Vercel using cookie-based sessions",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "start": "node api/chat.js"
+    "dev": "vercel dev"
   },
   "dependencies": {}
 }
