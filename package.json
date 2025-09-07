@@ -6,7 +6,9 @@
     "dev": "vercel dev"
   },
   "dependencies": {
-    "@google/genai": "^0.5.0",
-    "@neondatabase/serverless": "^1.2.0"
+    "@google/genai": ">=0.5.0"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }
