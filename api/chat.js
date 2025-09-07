@@ -13,7 +13,7 @@ function newSessionId() {
   return Math.random().toString(36).substring(2);
 }
 
-// --- Gemini API call ---
+// --- Gemini API ---
 async function askGemini(prompt, history) {
   try {
     const contents = [
