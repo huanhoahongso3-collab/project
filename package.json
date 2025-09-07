@@ -1,14 +1,11 @@
 {
   "name": "vercel-gemini-chat",
   "version": "1.0.0",
-  "description": "Gemini Chatbot serverless on Vercel",
-  "main": "index.js",
+  "description": "Gemini Chatbot on Vercel using cookie-based sessions",
+  "type": "module",
   "scripts": {
     "dev": "vercel dev",
-    "start": "node index.js"
+    "start": "node api/chat.js"
   },
-  "dependencies": {
-  },
-  "type": "module"
+  "dependencies": {}
 }
-
