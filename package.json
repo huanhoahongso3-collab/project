@@ -1,25 +1,14 @@
 {
-  "name": "gemini-chatbot",
+  "name": "vercel-gemini-chat",
   "version": "1.0.0",
-  "description": "Node.js Gemini Chatbot compatible with Vercel and Opera Mini",
-  "main": "api/chat.js",
+  "description": "Gemini Chatbot serverless on Vercel",
+  "main": "index.js",
   "scripts": {
-    "start": "node api/chat.js",
-    "vercel-build": "echo Build complete"
+    "dev": "vercel dev",
+    "start": "node index.js"
   },
   "dependencies": {
-    "@google/genai": ">=0.1.0"
+    "node-fetch": "^3.4.0"
   },
-  "engines": {
-    "node": "20.x"
-  },
-  "keywords": [
-    "chatbot",
-    "gemini",
-    "nodejs",
-    "vercel"
-  ],
-  "author": "hhhso3-collab",
-  "license": "MIT"
+  "type": "module"
 }
-
