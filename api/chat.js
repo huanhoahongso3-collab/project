@@ -1,4 +1,3 @@
-// api/chat.js
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // --- Helpers ---
@@ -51,8 +50,15 @@ async function askGemini(prompt, history) {
         body: JSON.stringify({ contents })
       }
     );
+
     const data = await res.json();
-    return data?.candidates?.[0]?.content?.[0]?.text || "(no response)";
+    console.log("Gemini API response:", JSON.stringify(data, null, 2));
+
+    // Find output_text in content
+    return (
+      data?.candidates?.[0]?.content?.find(c => c.type === "output_text")?.text ||
+      "(no response)"
+    );
   } catch (err) {
     console.error("Gemini API error:", err);
     return "(error contacting AI)";
@@ -88,7 +94,14 @@ button { padding: 5px 10px; }
 </div>
 <hr>
 <div>
-${history.map(msg => `<div class="message"><b>${msg.role === "user" ? "You" : "Bot"}:</b><div class="bubble">${msg.text}</div></div>`).join("")}
+${history
+    .map(
+      msg =>
+        `<div class="message"><b>${
+          msg.role === "user" ? "You" : "Bot"
+        }:</b><div class="bubble">${msg.text}</div></div>`
+    )
+    .join("")}
 </div>
 </body>
 </html>
@@ -105,6 +118,7 @@ export default async function handler(req, res) {
     ? decodeHistory(cookies[`history_${sessionId}`])
     : [];
 
+  // Clear history
   if (req.method === "POST" && req.url.includes("clear")) {
     history = [];
     res.setHeader("Set-Cookie", [
@@ -114,6 +128,7 @@ export default async function handler(req, res) {
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
 
+  // Handle user prompt
   if (req.method === "POST") {
     let body = "";
     for await (const chunk of req) body += chunk;
