@@ -32,9 +32,14 @@ async function askGemini(prompt, history) {
       contents,
     });
 
-    console.log("Gemini response:", response);
+    console.log("Gemini raw response:", response);
 
-    return response?.text || "(no response)";
+    // Extract text from first candidate
+    const text =
+      response?.candidates?.[0]?.content?.[0]?.text ||
+      "(no response)";
+
+    return text;
   } catch (err) {
     console.error("Gemini API error:", err.response?.data || err);
     return "(error contacting AI)";
