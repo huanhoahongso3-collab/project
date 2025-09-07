@@ -26,7 +26,7 @@ function renderChat(history, sessionId) {
 <meta charset="UTF-8">
 <title>Cerebras Chat</title>
 <!-- Favicon: ChatGPT logo -->
-<link rel="icon" href="https://static.vecteezy.com/system/resources/previews/002/284/111/original/chatgpt-logo-transparent-background-png.png" type="image/png">
+<link rel="icon" href="https://chat.dhp2010.is-a.dev/chatgpt.png" type="image/png">
 <style>
 body { font-family: sans-serif; max-width: 600px; margin: auto; }
 form { margin-top: 10px; display:flex; gap:5px; }
