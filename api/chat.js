@@ -25,6 +25,8 @@ function renderChat(history, sessionId) {
 <head>
 <meta charset="UTF-8">
 <title>Cerebras Chat</title>
+<!-- Favicon: ChatGPT logo -->
+<link rel="icon" href="https://static.vecteezy.com/system/resources/previews/002/284/111/original/chatgpt-logo-transparent-background-png.png" type="image/png">
 <style>
 body { font-family: sans-serif; max-width: 600px; margin: auto; }
 form { margin-top: 10px; display:flex; gap:5px; }
@@ -116,7 +118,7 @@ export default async function handler(req, res) {
           ],
           model: "gpt-oss-120b",
           stream: true,
-          max_completion_tokens: 65536, // For testing; can be increased
+          max_completion_tokens: 65536,
           temperature: 0.7,
           top_p: 0.6,
           reasoning_effort: "medium"
