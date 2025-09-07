@@ -1,4 +1,8 @@
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+import { GoogleGenAI } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
 
 // --- Helpers ---
 function formatText(text) {
@@ -32,39 +36,30 @@ function decodeHistory(cookieValue) {
   }
 }
 
+// --- Call Gemini API ---
 async function askGemini(prompt, history) {
-  const contents = [
-    ...history.map(msg => ({ role: msg.role, parts: [{ text: msg.text }] })),
-    { role: "user", parts: [{ text: prompt }] }
-  ];
-
   try {
-    const res = await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-      {
-        method: "POST",
-        headers: {
-          "x-goog-api-key": GEMINI_API_KEY,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ contents })
-      }
-    );
+    const contents = [
+      ...history.map(msg => ({
+        role: msg.role === "user" ? "user" : "assistant",
+        parts: [{ text: msg.text }],
+      })),
+      { role: "user", parts: [{ text: prompt }] },
+    ];
 
-    const data = await res.json();
-    console.log("Gemini API response:", JSON.stringify(data, null, 2));
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents,
+    });
 
-    // Find output_text in content
-    return (
-      data?.candidates?.[0]?.content?.find(c => c.type === "output_text")?.text ||
-      "(no response)"
-    );
+    return response.text || "(no response)";
   } catch (err) {
     console.error("Gemini API error:", err);
     return "(error contacting AI)";
   }
 }
 
+// --- Render HTML ---
 function renderChat(history) {
   return `
 <!DOCTYPE html>
@@ -113,7 +108,6 @@ export default async function handler(req, res) {
   const cookies = parseCookies(req.headers.cookie);
   let sessionId = cookies.sessionId || newSessionId();
 
-  // Load history from cookie
   let history = cookies[`history_${sessionId}`]
     ? decodeHistory(cookies[`history_${sessionId}`])
     : [];
@@ -123,7 +117,7 @@ export default async function handler(req, res) {
     history = [];
     res.setHeader("Set-Cookie", [
       `sessionId=${sessionId}; Path=/`,
-      `history_${sessionId}=; Path=/; Max-Age=0`
+      `history_${sessionId}=; Path=/; Max-Age=0`,
     ]);
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
@@ -139,16 +133,15 @@ export default async function handler(req, res) {
     const reply = await askGemini(prompt, history);
     history.push({ role: "bot", text: formatText(reply) });
 
-    // Save history in cookie
     res.setHeader("Set-Cookie", [
       `sessionId=${sessionId}; Path=/`,
-      `history_${sessionId}=${encodeHistory(history)}; Path=/; HttpOnly`
+      `history_${sessionId}=${encodeHistory(history)}; Path=/; HttpOnly`,
     ]);
 
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
 
-  // GET → render HTML
+  // GET → render chat
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderChat(history));
 }
