@@ -18,9 +18,10 @@ function newSessionId() {
 
 async function askGemini(prompt, history) {
   try {
+    // Use 'user' and 'model' only for roles
     const contents = [
       ...history.map((msg) => ({
-        role: msg.role === "user" ? "user" : "assistant",
+        role: msg.role === "user" ? "user" : "model",
         parts: [{ text: msg.text }],
       })),
       { role: "user", parts: [{ text: prompt }] },
@@ -124,7 +125,7 @@ export default async function handler(req, res) {
         // Limit AI context to last 10 messages
         const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
         const reply = await askGemini(prompt, chatHistory.slice(-10));
-        chatHistory.push({ role: "bot", text: formatText(reply) });
+        chatHistory.push({ role: "model", text: formatText(reply) });
 
         // Insert last 2 messages (user + bot) into DB
         for (const msg of chatHistory.slice(-2)) {
