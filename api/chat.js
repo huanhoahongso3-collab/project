@@ -9,7 +9,7 @@ const cerebras = new Cerebras({ apiKey: process.env.CEREBRAS_API_KEY });
 
 // --- Helpers ---
 function escapeHtml(str) {
-  return str
+  return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -26,6 +26,8 @@ function newSessionId() {
 }
 
 function renderChat(history, sessionId) {
+  // Only render last 20 messages for safety
+  const recentHistory = history.slice(-20);
   return `
 <!DOCTYPE html>
 <html>
@@ -43,23 +45,26 @@ button { padding:5px 10px; }
 </head>
 <body>
 <h2>Cerebras Chat</h2>
+
 <div style="display:flex; gap:10px; align-items:flex-start; margin-bottom:10px;">
-<form method="post" action="/" style="flex:1; display:flex; gap:5px;">
-<input type="text" name="prompt" placeholder="Type your message..." required>
-<button type="submit">Send</button>
-</form>
-<form method="post" action="/?clear=1">
-<button type="submit">Clear History</button>
-</form>
+  <form method="post" action="/" style="flex:1; display:flex; gap:5px;">
+    <input type="text" name="prompt" placeholder="Type your message..." required>
+    <button type="submit">Send</button>
+  </form>
+  <form method="post" action="/?clear=1">
+    <button type="submit">Clear History</button>
+  </form>
 </div>
 <hr>
 <div>
-${history.map(
+${recentHistory
+  .map(
     (msg) =>
       `<div class="message"><b>${
         msg.role === "user" ? "You" : "Bot"
       }:</b><div class="bubble">${escapeHtml(msg.text)}</div></div>`
-  ).join("")}
+  )
+  .join("")}
 </div>
 </body>
 </html>
@@ -68,28 +73,33 @@ ${history.map(
 
 // --- Ask Cerebras ---
 async function askCerebras(prompt, history) {
-  const stream = await cerebras.chat.completions.create({
-    messages: [
-      { role: "system", content: "You are a helpful assistant." },
-      ...history.map((m) => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: m.text,
-      })),
-      { role: "user", content: prompt },
-    ],
-    model: "gpt-oss-120b",
-    stream: false, // non-streaming
-    max_completion_tokens: 16384, // safe for ~2000 words
-    temperature: 1,
-    top_p: 1,
-    reasoning_effort: "medium",
-  });
+  try {
+    const stream = await cerebras.chat.completions.create({
+      messages: [
+        { role: "system", content: "You are a helpful assistant." },
+        ...history.map((m) => ({
+          role: m.role === "user" ? "user" : "assistant",
+          content: m.text,
+        })),
+        { role: "user", content: prompt },
+      ],
+      model: "gpt-oss-120b",
+      stream: false, // non-streaming for Opera Mini
+      max_completion_tokens: 8192, // safe for ~2000 words
+      temperature: 1,
+      top_p: 1,
+      reasoning_effort: "medium",
+    });
 
-  let reply = "";
-  for await (const chunk of stream) {
-    reply += chunk.choices[0]?.delta?.content || "";
+    let reply = "";
+    for await (const chunk of stream) {
+      reply += chunk.choices[0]?.delta?.content || "";
+    }
+    return reply;
+  } catch (err) {
+    console.error("Cerebras API error:", err);
+    return "(error generating AI response)";
   }
-  return reply;
 }
 
 // --- Serverless handler ---
@@ -163,6 +173,7 @@ export default async function handler(req, res) {
     // GET → render page
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderChat(history, sessionId));
+
   } catch (err) {
     console.error("Server error:", err);
     res.writeHead(500, { "Content-Type": "text/plain" });
