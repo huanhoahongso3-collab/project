@@ -5,11 +5,18 @@ import Cerebras from "@cerebras/cerebras_cloud_sdk";
 const sql = neon(process.env.DATABASE_URL);
 
 // --- Cerebras client ---
-const cerebras = new Cerebras({
-  apiKey: process.env.CEREBRAS_API_KEY
-});
+const cerebras = new Cerebras({ apiKey: process.env.CEREBRAS_API_KEY });
 
 // --- Helpers ---
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 function formatText(text) {
   return text?.replace(/\*\*(.*?)\*\*/g, "<b>$1</b>") || "";
 }
@@ -26,7 +33,7 @@ function renderChat(history, sessionId) {
 <meta charset="UTF-8">
 <title>Cerebras Chat</title>
 <style>
-body { font-family: sans-serif; max-width: 600px; margin: auto; }
+body { font-family: sans-serif; max-width: 700px; margin: auto; }
 form { margin-top: 10px; display:flex; gap:5px; }
 input[type=text] { flex:1; padding:5px; }
 button { padding:5px 10px; }
@@ -47,14 +54,42 @@ button { padding:5px 10px; }
 </div>
 <hr>
 <div>
-${history.map(msg => `
-  <div class="message"><b>${msg.role === "user" ? "You" : "Bot"}:</b>
-  <div class="bubble">${msg.text}</div></div>
-`).join("")}
+${history.map(
+    (msg) =>
+      `<div class="message"><b>${
+        msg.role === "user" ? "You" : "Bot"
+      }:</b><div class="bubble">${escapeHtml(msg.text)}</div></div>`
+  ).join("")}
 </div>
 </body>
 </html>
 `;
+}
+
+// --- Ask Cerebras ---
+async function askCerebras(prompt, history) {
+  const stream = await cerebras.chat.completions.create({
+    messages: [
+      { role: "system", content: "You are a helpful assistant." },
+      ...history.map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        content: m.text,
+      })),
+      { role: "user", content: prompt },
+    ],
+    model: "gpt-oss-120b",
+    stream: false, // non-streaming
+    max_completion_tokens: 16384, // safe for ~2000 words
+    temperature: 1,
+    top_p: 1,
+    reasoning_effort: "medium",
+  });
+
+  let reply = "";
+  for await (const chunk of stream) {
+    reply += chunk.choices[0]?.delta?.content || "";
+  }
+  return reply;
 }
 
 // --- Serverless handler ---
@@ -62,10 +97,12 @@ export default async function handler(req, res) {
   try {
     // Parse cookies
     const cookies = Object.fromEntries(
-      (req.headers.cookie || "").split(";").map(c => {
-        const [k, ...v] = c.split("=");
-        return [k?.trim(), decodeURIComponent(v.join("="))];
-      })
+      (req.headers.cookie || "")
+        .split(";")
+        .map((c) => {
+          const [k, ...v] = c.split("=");
+          return [k?.trim(), decodeURIComponent(v.join("="))];
+        })
     );
 
     let sessionId = cookies.sessionId || newSessionId();
@@ -84,67 +121,48 @@ export default async function handler(req, res) {
       WHERE session_id = ${sessionId}
       ORDER BY created_at ASC
     `;
-    const history = dbHistory.map(h => ({ role: h.role, text: h.text }));
+    const history = dbHistory.map((h) => ({ role: h.role, text: h.text }));
 
     if (req.method === "POST") {
-      const body = await new Promise(resolve => {
+      const body = await new Promise((resolve) => {
         let data = "";
-        req.on("data", chunk => data += chunk);
+        req.on("data", (chunk) => (data += chunk));
         req.on("end", () => resolve(data));
       });
 
       const params = new URLSearchParams(body);
-      const prompt = params.get("prompt");
+      const prompt = params.get("prompt")?.trim();
 
-      if (prompt?.trim()) {
+      if (prompt) {
         const formattedPrompt = formatText(prompt);
 
-        // Insert user message into DB
+        // Insert user message
         await sql`
           INSERT INTO chat_history (session_id, role, text)
           VALUES (${sessionId}, 'user', ${formattedPrompt})
         `;
         history.push({ role: "user", text: formattedPrompt });
 
-        // Call Cerebras GPT-OSS-120B (streamed)
-        let replyText = "";
-        const stream = await cerebras.chat.completions.create({
-          messages: [
-            { role: "system", content: "You are a helpful assistant." },
-            ...history.map(m => ({ role: m.role === "user" ? "user" : "assistant", content: m.text })),
-            { role: "user", content: prompt }
-          ],
-          model: "gpt-oss-120b",
-          stream: true,
-          max_completion_tokens: 1024, // For testing; can be increased
-          temperature: 1,
-          top_p: 1,
-          reasoning_effort: "medium"
-        });
+        // Ask Cerebras
+        const reply = await askCerebras(prompt, history.slice(-10)); // last 10 messages context
+        const formattedReply = formatText(reply);
 
-        for await (const chunk of stream) {
-          const delta = chunk.choices[0]?.delta?.content || "";
-          replyText += delta;
-        }
-
-        const formattedReply = formatText(replyText);
-
-        // Insert bot reply into DB
+        // Insert bot reply
         await sql`
           INSERT INTO chat_history (session_id, role, text)
           VALUES (${sessionId}, 'bot', ${formattedReply})
         `;
         history.push({ role: "bot", text: formattedReply });
 
+        // Render updated chat
         return res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
           .end(renderChat(history, sessionId));
       }
     }
 
-    // GET → render chat page
+    // GET → render page
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderChat(history, sessionId));
-
   } catch (err) {
     console.error("Server error:", err);
     res.writeHead(500, { "Content-Type": "text/plain" });
