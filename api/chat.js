@@ -116,7 +116,7 @@ export default async function handler(req, res) {
           ],
           model: "gpt-oss-120b",
           stream: true,
-          max_completion_tokens: 16384, // For testing; can be increased
+          max_completion_tokens: 65536, // For testing; can be increased
           temperature: 0.7,
           top_p: 0.6,
           reasoning_effort: "medium"
