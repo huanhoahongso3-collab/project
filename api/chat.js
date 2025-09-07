@@ -1,8 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 import { GoogleGenAI } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const sql = neon(process.env.DATABASE_URL);
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // --- Helpers ---
 function formatText(text) {
@@ -80,7 +80,6 @@ ${history.map(
 
 // --- Serverless handler ---
 export default async function handler(req, res) {
-  // Parse cookies
   const cookies = Object.fromEntries(
     (req.headers.cookie || "").split(";").map((c) => {
       const [k, ...v] = c.split("=");
@@ -89,14 +88,12 @@ export default async function handler(req, res) {
   );
   let sessionId = cookies.sessionId || newSessionId();
 
-  // Clear history
   if (req.method === "POST" && req.url.includes("clear")) {
     await sql`DELETE FROM chat_history WHERE session_id = ${sessionId}`;
     res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
 
-  // Retrieve chat history
   const dbHistory = await sql`
     SELECT role, text FROM chat_history
     WHERE session_id = ${sessionId}
@@ -104,20 +101,20 @@ export default async function handler(req, res) {
   `;
   const history = dbHistory.map((h) => ({ role: h.role, text: h.text }));
 
-  // Handle user input
   if (req.method === "POST") {
-    let body = "";
-    for await (const chunk of req) body += chunk;
+    const body = await new Promise((resolve) => {
+      let data = "";
+      req.on("data", (chunk) => (data += chunk));
+      req.on("end", () => resolve(data));
+    });
+
     const params = new URLSearchParams(body);
     const prompt = params.get("prompt");
 
     const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
-
-    // Generate AI response with last 10 messages
     const reply = await askGemini(prompt, chatHistory.slice(-10));
     chatHistory.push({ role: "bot", text: formatText(reply) });
 
-    // Insert user message and bot reply into DB
     for (const msg of chatHistory.slice(-2)) {
       await sql`
         INSERT INTO chat_history (session_id, role, text)
@@ -129,7 +126,6 @@ export default async function handler(req, res) {
     return res.writeHead(302, { Location: "/api/chat" }).end();
   }
 
-  // GET → render chat page
   res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   res.end(renderChat(history));
 }
