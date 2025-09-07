@@ -16,10 +16,11 @@ function newSessionId() {
   return Math.random().toString(36).substring(2);
 }
 
+// Ask Gemini AI
 async function askGemini(prompt, history) {
   try {
     const contents = [
-      ...history.map((msg) => ({
+      ...history.slice(-10).map((msg) => ({
         role: msg.role === "user" ? "user" : "assistant",
         parts: [{ text: msg.text }],
       })),
@@ -31,13 +32,16 @@ async function askGemini(prompt, history) {
       contents,
     });
 
-    return response.text || "(no response)";
+    console.log("Gemini response:", response);
+
+    return response?.text || "(no response)";
   } catch (err) {
-    console.error("Gemini API error:", err);
+    console.error("Gemini API error:", err.response?.data || err);
     return "(error contacting AI)";
   }
 }
 
+// Render HTML page
 function renderChat(history) {
   return `
 <!DOCTYPE html>
@@ -67,12 +71,14 @@ button { padding: 5px 10px; }
 </div>
 <hr>
 <div>
-${history.map(
+${history
+  .map(
     (msg) =>
       `<div class="message"><b>${
         msg.role === "user" ? "You" : "Bot"
       }:</b><div class="bubble">${msg.text}</div></div>`
-  ).join("")}
+  )
+  .join("")}
 </div>
 </body>
 </html>
@@ -109,6 +115,7 @@ export default async function handler(req, res) {
     `;
     const history = dbHistory.map((h) => ({ role: h.role, text: h.text }));
 
+    // Handle new message
     if (req.method === "POST") {
       const body = await new Promise((resolve) => {
         let data = "";
@@ -123,7 +130,7 @@ export default async function handler(req, res) {
         return res.writeHead(302, { Location: "/api/chat" }).end();
       }
 
-      // Limit AI context to last 10 messages
+      // Ask AI with last 10 messages
       const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
       const reply = await askGemini(prompt, chatHistory.slice(-10));
       chatHistory.push({ role: "bot", text: formatText(reply) });
@@ -140,7 +147,7 @@ export default async function handler(req, res) {
       return res.writeHead(302, { Location: "/api/chat" }).end();
     }
 
-    // GET → render chat page
+    // GET → render page
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(renderChat(history));
   } catch (err) {
