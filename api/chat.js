@@ -16,12 +16,11 @@ function newSessionId() {
   return Math.random().toString(36).substring(2);
 }
 
-// Ask Gemini AI (old message reading, compatible with response.text)
 async function askGemini(prompt, history) {
   try {
     const contents = [
-      ...history.map(msg => ({
-        role: msg.role === "user" ? "user" : "model", // must be "model"
+      ...history.map((msg) => ({
+        role: msg.role === "user" ? "user" : "assistant",
         parts: [{ text: msg.text }],
       })),
       { role: "user", parts: [{ text: prompt }] },
@@ -32,7 +31,6 @@ async function askGemini(prompt, history) {
       contents,
     });
 
-    // Old logic: just use `response.text` as before
     return response.text || "(no response)";
   } catch (err) {
     console.error("Gemini API error:", err);
@@ -40,8 +38,7 @@ async function askGemini(prompt, history) {
   }
 }
 
-// Render chat HTML
-function renderChat(history) {
+function renderChat(history, sessionId) {
   return `
 <!DOCTYPE html>
 <html>
@@ -60,19 +57,21 @@ button { padding: 5px 10px; }
 <body>
 <h2>Gemini Chatbot</h2>
 <div style="display:flex; gap:10px; align-items:flex-start; margin-bottom:10px;">
-<form method="post" action="/api/chat" style="flex:1; display:flex; gap:5px;">
+<form method="post" action="/" style="flex:1; display:flex; gap:5px;">
 <input type="text" name="prompt" placeholder="Type your message..." required>
 <button type="submit">Send</button>
 </form>
-<form method="post" action="/api/chat?clear=1">
+<form method="post" action="/?clear=1">
 <button type="submit">Clear History</button>
 </form>
 </div>
 <hr>
 <div>
 ${history.map(
-    msg =>
-      `<div class="message"><b>${msg.role === "user" ? "You" : "Bot"}:</b><div class="bubble">${msg.text}</div></div>`
+    (msg) =>
+      `<div class="message"><b>${
+        msg.role === "user" ? "You" : "Bot"
+      }:</b><div class="bubble">${msg.text}</div></div>`
   ).join("")}
 </div>
 </body>
@@ -87,19 +86,20 @@ export default async function handler(req, res) {
     const cookies = Object.fromEntries(
       (req.headers.cookie || "")
         .split(";")
-        .map(c => {
+        .map((c) => {
           const [k, ...v] = c.split("=");
           return [k?.trim(), decodeURIComponent(v.join("="))];
         })
     );
 
     let sessionId = cookies.sessionId || newSessionId();
+    res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
 
     // Clear history
     if (req.method === "POST" && req.url.includes("clear")) {
       await sql`DELETE FROM chat_history WHERE session_id = ${sessionId}`;
-      res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
-      return res.writeHead(302, { Location: "/api/chat" }).end();
+      return res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+        .end(renderChat([], sessionId));
     }
 
     // Retrieve chat history
@@ -108,40 +108,41 @@ export default async function handler(req, res) {
       WHERE session_id = ${sessionId}
       ORDER BY created_at ASC
     `;
-    const history = dbHistory.map(h => ({ role: h.role, text: h.text }));
+    const history = dbHistory.map((h) => ({ role: h.role, text: h.text }));
 
-    // Handle new message
     if (req.method === "POST") {
-      const body = await new Promise(resolve => {
+      const body = await new Promise((resolve) => {
         let data = "";
-        req.on("data", chunk => (data += chunk));
+        req.on("data", (chunk) => (data += chunk));
         req.on("end", () => resolve(data));
       });
 
       const params = new URLSearchParams(body);
-      const prompt = params.get("prompt")?.trim();
-      if (!prompt) return res.writeHead(302, { Location: "/api/chat" }).end();
+      const prompt = params.get("prompt");
 
-      // Limit AI context to last 10 messages
-      const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
-      const reply = await askGemini(prompt, chatHistory.slice(-10));
-      chatHistory.push({ role: "bot", text: formatText(reply) });
+      if (prompt?.trim()) {
+        // Limit AI context to last 10 messages
+        const chatHistory = [...history, { role: "user", text: formatText(prompt) }];
+        const reply = await askGemini(prompt, chatHistory.slice(-10));
+        chatHistory.push({ role: "bot", text: formatText(reply) });
 
-      // Insert last 2 messages (user + bot) into DB
-      for (const msg of chatHistory.slice(-2)) {
-        await sql`
-          INSERT INTO chat_history (session_id, role, text)
-          VALUES (${sessionId}, ${msg.role}, ${msg.text})
-        `;
+        // Insert last 2 messages (user + bot) into DB
+        for (const msg of chatHistory.slice(-2)) {
+          await sql`
+            INSERT INTO chat_history (session_id, role, text)
+            VALUES (${sessionId}, ${msg.role}, ${msg.text})
+          `;
+        }
+
+        // Render updated chat
+        return res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+          .end(renderChat(chatHistory, sessionId));
       }
-
-      res.setHeader("Set-Cookie", `sessionId=${sessionId}; Path=/`);
-      return res.writeHead(302, { Location: "/api/chat" }).end();
     }
 
-    // GET → render page
+    // GET → render chat page
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    res.end(renderChat(history));
+    res.end(renderChat(history, sessionId));
   } catch (err) {
     console.error("Server error:", err);
     res.writeHead(500, { "Content-Type": "text/plain" });
